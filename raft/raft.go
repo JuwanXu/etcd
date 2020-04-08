@@ -251,33 +251,47 @@ func (c *Config) validate() error {
 	return nil
 }
 
+//在结构体 raft 中封装了当前节点所有的核心数据
 type raft struct {
+	//当前节点在集群中 ID
 	id uint64
-
+	//当前任期号，如果为 0 则表示该消息是本地消息
 	Term uint64
+	//当前任期中当前节点将选票投给了哪个节点 ，未投票时，该字段为 None
 	Vote uint64
 
+	//与只读请求相关
 	readStates []ReadState
 
 	// the log
+	//本地log
 	raftLog *raftLog
-
+	//单条消息的最大字节数。
 	maxMsgSize         uint64
+	//己经发送出去但未收到响 消息个数上限，如果处于该状态消息超过该值 ，则暂停当前节点的消息发送。这是为了防止集群中的某个节点不断发送消息，引起网络阻塞或是压垮其他节点，从而影响其他节点的正常运行
 	maxUncommittedSize uint64
+
 	// TODO(tbg): rename to trk.
+	//逻辑可能有变动---------
+	//Leader 节点会记录集群中其他节点的日志复制情况 （NextIndex 和 MatchIndex ）。
+	//在 etcd-raft模块中，Follower 节点对应的 NextIndex 和 MatchIndex 值都封装在 Progress 实例中
+	//除此之外， Progress 例中还封装 了对 Follower 的相关信
 	prs tracker.ProgressTracker
 
+	//当前节点在集群中的角色，可选值分为 StateFollower、StateCandidate、StateLeader、StatePreCandidate四种状态
 	state StateType
 
 	// isLearner is true if the local raft node is a learner.
 	isLearner bool
-
+	//缓存了当前节点等待发送的消息。
 	msgs []pb.Message
 
 	// the leader id
+	//当前集群中 Leader 节点的 ID
 	lead uint64
 	// leadTransferee is id of the leader transfer target when its value is not zero.
 	// Follow the procedure defined in raft thesis 3.10.
+	//用于集群中 Leader 节点的转移， 记录了此次 Leader 角色转移的目标节点的 ID
 	leadTransferee uint64
 	// Only one conf change may be pending (in the log, but not yet
 	// applied) at a time. This is enforced via pendingConfIndex, which
@@ -291,30 +305,65 @@ type raft struct {
 	// term changes.
 	uncommittedSize uint64
 
+	//与只读请求相关
 	readOnly *readOnly
 
 	// number of ticks since it reached last electionTimeout when it is leader
 	// or candidate.
 	// number of ticks since it reached last electionTimeout or received a
 	// valid message from current leader when it is a follower.
+	// 选举计时器的指针，其单位是逻辑时钟的刻度，逻辑时钟每推进一次，该字段值就会增加 1
 	electionElapsed int
 
 	// number of ticks since it reached last heartbeatTimeout.
 	// only leader keeps heartbeatElapsed.
+	//心跳计时器的指针，其单位也是逻辑时钟的刻度，逻辑时钟每推进一次，该字段值就会增加 1 。
 	heartbeatElapsed int
 
+	//Raft 协议中提到， Leader 节点只有在收到更大
+	//term 值的消息时才会切换成 Follower 状态。故在发生网络分区时，即使在其他分
+	//区里新的 Leader 节点己经被选举出来，旧的 Leader 节点由于接收不到新 leader 节点的心
+	//跳消息 依然会认为自己是当前集群的 Leader 节点（与其同一网络分区
+	//Follower 节点也认为它是当前集群的 Leader 节点），它依然会接收客户端的请求，但
+	//无法向客户端返回任何响应。 eckQuorum 机制的意思是： 每隔一段时间， Leader
+	//点会尝试连接集群中的其他节点（发送心跳消息），如果发现自己可以连接到节点个数
+	//没有超过半数（即没有收到足够的心跳响应），则主动切换成 Follower 状态。这样，
+	//在上述网络分区的场景中，旧的 Leader 节点可以很快知道自己己经过期，可以减少
+	//client 连接 Leader 节点的等待时间
 	checkQuorum bool
+	//介绍 Raft 协议时提到， Follower 节点在选举计时器超
+	//时之后，会切换成 Candidate 状态并发起选举。然而 Follower 节点超时没有收到心跳
+	//消息时，也可能是由于 Follower 节点自身的网络问题导致的，例如，前面提到的网络
+	//分区的场景 即使如此，该 Follower 节点还是会不断地发起选举，其 Term 值也会不
+	//断递增。待该 Follower 节点的网络故障恢复并收到 Leader 节点的心跳消息时，由于其
+	//Term 值己经增加，该 Follower 节点会丢弃掉 Term 值比其自身小的心跳消息，之后就
+	//会触发一次没有必要进行的 Leader 选举。Raft 协议也提到了 PreVote
+	//化避免上述情况，当 Follower 节点准备发起一次选举之前，会先连接集群中的其他节
+	//点，并询 们是否愿意参与选举，如果集群中的其他节点能够正常收到 Leader
+	//的心跳消息，则会拒绝参与选举，反之则参与选举。当在 PreVote 过程中，有超过半
+	//数的节点响应并参与新一轮选举，则可以发起新一轮的选举。
 	preVote     bool
 
+	//心跳超时时间， heartbeatElapsed 字段值到达该值时，就会触发 Leader 节点发送一条心跳消息。
 	heartbeatTimeout int
+
+	//选举超时时间，当 electionElapsed 宇段值到达该值时，就会触发新一轮的选举。
 	electionTimeout  int
 	// randomizedElectionTimeout is a random number between
 	// [electiontimeout, 2 * electiontimeout - 1]. It gets reset
 	// when raft changes its state to follower or candidate.
+	//该字段是 [electiontimeout, 2 * electiontimeout - 1]之间的随机值，也是选举计时器的上限，当 electionElapsed 超过该值时即为超时。
 	randomizedElectionTimeout int
+
 	disableProposalForwarding bool
 
+	//当前节点推进逻辑时钟的函数。如果当前节点是 Leader ，则指向 raft.tickHeartbeat() 函数，
+	//如果当前节点是 Follower 或是 Candidate ，则指向 raft.tickElection() 函数
 	tick func()
+
+	//当前节点收到消息时的处理函数。如果是 Leader 节点，
+	//则该字段指向 stepLeader() 函数，如果是 Follower 节点，则该字段指向 stepFollower() 函数，
+	//如果是处于 preVote 阶段的节点或是 Candidate 节点，则该字段指向 stepCandidate() 函数。
 	step stepFunc
 
 	logger Logger

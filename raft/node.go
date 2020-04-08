@@ -123,6 +123,8 @@ func (rd Ready) appliedCursor() uint64 {
 }
 
 // Node represents a node in a raft cluster.
+// 对etcd-raft模块具体实现的一层封装，方便上层模块（etcd ra负模块的调用者，上层模块通过 Node 提供的 API 与底层的 cd-ra
+//模块进行交互）使用etcd-raft模块
 type Node interface {
 	// Tick increments the internal logical clock for the Node by a single tick. Election
 	// timeouts and heartbeat timeouts are in units of ticks.
