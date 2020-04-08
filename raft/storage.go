@@ -43,31 +43,48 @@ var ErrSnapshotTemporarilyUnavailable = errors.New("snapshot is temporarily unav
 // If any Storage method returns an error, the raft instance will
 // become inoperable and refuse to participate in elections; the
 // application is responsible for cleanup and recovery in this case.
+// etcd-raft 模块中定义了 Storage 接口，其主要作用就是存储当前节点接收到的 Entry 记录。
 type Storage interface {
 	// TODO(tbg): split this into two interfaces, LogStorage and StateStorage.
 
 	// InitialState returns the saved HardState and ConfState information.
+	//返回 Storage 中记录的状态信息，返回的是 HardState 实例和 ConfState 实例
+	//在 Raft 协议时捉到，集群中每个节点都需要保存一些必需的基本信息，在 Etcd 中将其
+	//封装成 HardState ，其中主要封装了当前任期号（ Term 字段）、当前节点在该任期中将选票投
+	//给了哪个节，（ vote 字段）、已提交 Entry 记录的位置（ Commit 字段，即最后一条提交记录的索引值）
+	// ConfState 中封装了当前集群中所有节点的 ID (Nodes 字段）
 	InitialState() (pb.HardState, pb.ConfState, error)
+
 	// Entries returns a slice of log entries in the range [lo,hi).
 	// MaxSize limits the total size of the log entries returned, but
 	// Entries returns at least one entry if any.
+	//在 Storage 记录了当前节点的所有 Entry 记录， Entries 方法返回指定范固的 Entry 记录（［lo,hi))
+	//第三个参数｛ maxSize ）限定了返回的 Entry 集合的字节数上限
 	Entries(lo, hi, maxSize uint64) ([]pb.Entry, error)
+
 	// Term returns the term of entry i, which must be in the range
 	// [FirstIndex()-1, LastIndex()]. The term of the entry before
 	// FirstIndex is retained for matching purposes even though the
 	// rest of that entry may not be available.
+	// 查询指定 Index 对应的 Entry 的 Term 值
 	Term(i uint64) (uint64, error)
+
 	// LastIndex returns the index of the last entry in the log.
+	//该方法返回 storage 中记录的最后一条 Entry 的索引值 （Index）
 	LastIndex() (uint64, error)
+
 	// FirstIndex returns the index of the first log entry that is
 	// possibly available via Entries (older entries have been incorporated
 	// into the latest Snapshot; if storage only contains the dummy entry the
 	// first log entry is not available).
+	//该方法返回 Storage 中记录的第一条 Entry 的索引值（ Index ），在该 Entry 之前的所有 Entry 都已经被包含进了最近的一次 Snapshot 中
 	FirstIndex() (uint64, error)
+
 	// Snapshot returns the most recent snapshot.
 	// If snapshot is temporarily unavailable, it should return ErrSnapshotTemporarilyUnavailable,
 	// so raft state machine could know that Storage needs some time to prepare
 	// snapshot and call Snapshot later.
+	//返回最近一次生成的快照数据
 	Snapshot() (pb.Snapshot, error)
 }
 
