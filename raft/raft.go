@@ -290,7 +290,7 @@ type raft struct {
 	//逻辑可能有变动---------
 	//Leader 节点会记录集群中其他节点的日志复制情况 （NextIndex 和 MatchIndex ）。
 	//在 etcd-raft模块中，Follower 节点对应的 NextIndex 和 MatchIndex 值都封装在 Progress 实例中
-	//除此之外， Progress 例中还封装 了对 Follower 的相关信
+	//除此之外， Progress 例中还封装了对 Follower 的相关信息
 	prs tracker.ProgressTracker
 
 	//当前节点在集群中的角色，可选值分为 StateFollower、StateCandidate、StateLeader、StatePreCandidate四种状态
